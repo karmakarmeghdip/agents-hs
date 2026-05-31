@@ -3,5 +3,6 @@ packages:
   packages/agents-openai
   packages/agents-claude
   packages/agents-openai-test
+  packages/agents-claude-test
 
 allow-newer: *

@@ -12,21 +12,24 @@ A multi-package Haskell library for LLM provider abstraction (similar to Vercel 
 
 ```bash
 cabal build                          # Build all packages
-cabal build agents-openai-test       # Build test executable only
-cabal run agents-openai-test         # Run tests (requires .env with OPENAI_API_KEY)
+cabal build agents-openai-test       # Build OpenAI test executable only
+cabal build agents-claude-test       # Build Claude test executable only
+cabal run agents-openai-test         # Run OpenAI tests (requires .env with OPENAI_API_KEY)
+cabal run agents-claude-test         # Run Claude tests (requires .env with ANTHROPIC_API_KEY)
 ```
 
-There is no test suite runner (`cabal test`). Tests are a manual executable at `packages/agents-openai-test/app/Main.hs` that hits the real OpenAI API. You need a `.env` file with `OPENAI_API_KEY` at the project root.
+There is no test suite runner (`cabal test`). Tests are manual executables that hit the real APIs. You need a `.env` file at the project root with `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY`.
 
 Important: `cabal.project` has `allow-newer: *` — this is required for GHC 9.14.1 (base 4.22) compatibility with servant-client. Do not remove it.
 
 ## Package Structure
 
 ```
-packages/agents-core/       # Provider typeclass, message types, stream events, tool defs, schema, errors
-packages/agents-openai/     # OpenAI Chat Completions provider (functional)
-packages/agents-claude/     # Claude provider (stubs only — all methods error)
-packages/agents-openai-test/ # Test executable hitting real OpenAI API
+packages/agents-core/         # Provider typeclass, message types, stream events, tool defs, schema, errors
+packages/agents-openai/       # OpenAI Chat Completions provider (functional)
+packages/agents-claude/       # Claude provider (functional — wraps claude Hackage package)
+packages/agents-openai-test/  # Test executable hitting real OpenAI API
+packages/agents-claude-test/  # Test executable hitting real Claude API
 ```
 
 All packages share version `0.1.0.0`. All modules use the `Agents.*` hierarchy.
@@ -43,6 +46,11 @@ All packages share version `0.1.0.0`. All modules use the `Agents.*` hierarchy.
 
 ## Key Gotchas
 
+- **Claude base URL**: Use `"https://api.anthropic.com"` (default). The `claude` Hackage package handles the `/v1` path internally.
+- **Claude streaming**: Uses `forkIO` + `TChan` to bridge the `claude` package's callback-based streaming into Conduit (same pattern as OpenAI).
+- **Claude `respond`**: Delegates to `generate` (Claude uses a single Messages API for both).
+- **Claude system messages**: Extracted from the message list and sent as the top-level `system` parameter per Claude API requirements.
+- **Claude `max_tokens`**: Required by Claude API; defaults to 4096 if not specified in `GenerationConfig`.
 - **OpenAI base URL**: Use `"https://api.openai.com"` (no `/v1` suffix). The `openai` Hackage package appends `/v1` internally.
 - **OpenAI streaming**: Uses `forkIO` + `TChan` to bridge the `openai` package's callback-based streaming into Conduit.
 - **OpenAI `respond`**: Currently delegates to `generate` (Responses API integration deferred).
@@ -53,7 +61,7 @@ All packages share version `0.1.0.0`. All modules use the `Agents.*` hierarchy.
 
 ## Incomplete / TODO
 
-- `Agents.Provider.Claude`: All three methods are stubs (`error "not yet implemented"`)
 - `Agents.Schema.jsonSchema`: Not implemented
 - OpenAI streaming: tool call delta assembly (`StreamToolCallDelta`, `StreamToolCallEnd`)
 - OpenAI `respond`: Should use the Responses API for tool calling
+- Claude streaming: tool call delta assembly (`StreamToolCallDelta`, `StreamToolCallEnd`) — currently only `StreamToolCallStart` is emitted

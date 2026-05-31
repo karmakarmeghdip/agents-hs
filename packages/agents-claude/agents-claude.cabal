@@ -20,7 +20,10 @@ library
     import:           warnings
 
     exposed-modules:
-        Agents.Provider.Claude
+        Agents.Provider.Claude,
+        Agents.Provider.Claude.Types,
+        Agents.Provider.Claude.Convert,
+        Agents.Provider.Claude.Streaming
 
     build-depends:
         base >= 4.18 && < 5,
@@ -33,7 +36,9 @@ library
         bytestring >= 0.11 && < 0.13,
         servant-client >= 0.19 && < 0.21,
         http-client >= 0.7 && < 0.8,
-        http-client-tls >= 0.3 && < 0.4
+        http-client-tls >= 0.3 && < 0.4,
+        vector >= 0.12 && < 0.14,
+        stm >= 2.5 && < 2.6
 
     hs-source-dirs:   src
     default-language: GHC2024
