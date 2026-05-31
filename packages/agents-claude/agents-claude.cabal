@@ -1,0 +1,39 @@
+cabal-version:      3.0
+name:               agents-claude
+version:            0.1.0.0
+synopsis:           Anthropic Claude provider implementation for agents-core
+description:
+  Concrete Provider implementation for Anthropic's Claude API.
+  Wraps the @claude@ Hackage package and adapts it to the
+  agents-core Provider typeclass.
+
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             karmakarmeghdip
+maintainer:         karmakarmeghdip@gmail.com
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+
+    exposed-modules:
+        Agents.Provider.Claude
+
+    build-depends:
+        base >= 4.18 && < 5,
+        agents-core,
+        claude >= 1.4 && < 1.5,
+        aeson >= 2.0 && < 2.3,
+        conduit >= 1.3 && < 1.4,
+        effectful >= 2.4 && < 2.6,
+        text >= 1.2 && < 2.2,
+        bytestring >= 0.11 && < 0.13,
+        servant-client >= 0.19 && < 0.21,
+        http-client >= 0.7 && < 0.8,
+        http-client-tls >= 0.3 && < 0.4
+
+    hs-source-dirs:   src
+    default-language: GHC2024

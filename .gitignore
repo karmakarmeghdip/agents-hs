@@ -1,0 +1,4 @@
+.env
+*.hi
+*.o
+dist-newstyle/

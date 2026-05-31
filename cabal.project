@@ -1,0 +1,7 @@
+packages:
+  packages/agents-core
+  packages/agents-openai
+  packages/agents-claude
+  packages/agents-openai-test
+
+allow-newer: *
