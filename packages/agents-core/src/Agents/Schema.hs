@@ -1,130 +1,171 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
+
 module Agents.Schema
     ( JsonSchema(..)
-    , jsonSchema
+    , HasJsonSchema(..)
     ) where
 
-import Data.Aeson (Value)
+import Data.Aeson (Value, object, (.=))
+import qualified Data.Aeson.Key as Key
+import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Vector as Vector
+import Data.Word (Word8, Word16, Word32, Word64)
+import GHC.Generics
 
--- | A JSON Schema representation for structured output enforcement.
---
--- === Architecture Decision: Generic/Aeson-deriving
---
--- Rather than hand-write JSON Schema @Value@s, we use GHC's Generic
--- mechanism to automatically derive both:
---
--- 1. The JSON Schema (via 'jsonSchema') - for telling the LLM what
---    shape of data to return
--- 2. The ToJSON/FromJSON instances - for parsing the LLM's response
---
--- This gives us type-safe roundtripping: a Haskell type T can be
--- turned into a schema (for the LLM request) and the LLM's JSON
--- response can be parsed back into T (for the application logic).
---
--- === Usage Example
---
--- @
--- {\-# LANGUAGE DeriveGeneric, DeriveAnyClass #-\}
---
--- data WeatherResponse = WeatherResponse
---     { temperature :: Double
---     , condition   :: Text
---     , humidity    :: Maybe Double
---     } deriving (Generic, ToJSON, FromJSON)
---
--- -- Derive the JSON Schema for WeatherResponse:
--- schema :: Value
--- schema = jsonSchema \@WeatherResponse
---
--- -- Use in GenerationConfig:
--- config = defaultGenerationConfig
---     { gcResponseSchema = Just schema }
--- @
---
--- === Implementation Plan
---
--- The 'jsonSchema' function inspects the Generic representation of a
--- type and produces a JSON Schema @Value@. It handles:
---
--- * Basic types: Text/String → {\"type\": \"string\"}
--- * Numeric types: Int, Double → {\"type\": \"integer\"/\"number\"}
--- * Maybe a → makes the field optional (not in \"required\")
--- * Lists → {\"type\": \"array\", \"items\": ...}
--- * Records → {\"type\": \"object\", \"properties\": ..., \"required\": ...}
--- * Sum types → {\"oneOf\": [...]} or enumerated strings
---
--- This is similar to how the @aeson@ package derives ToJSON/FromJSON,
--- but producing JSON Schema instead of JSON instances.
---
--- === Provider Mapping
---
--- * OpenAI: The schema is passed via @response_format.type = \"json_schema\@
---   with @response_format.json_schema.schema@ set to the derived schema.
--- * Claude: The schema is passed via tool definitions or via the
---   structured output feature with @response_format@.
---
--- Both providers require JSON Schema Draft 2020-12 or similar.
 data JsonSchema = JsonSchema
-    { jsSchema    :: Value
-    -- ^ The actual JSON Schema as an Aeson Value.
-    --   This is what gets sent to the LLM provider.
-
-    , jsTypeName   :: Maybe Text
-    -- ^ Optional name for the schema. Required by some providers
-    --   (e.g., OpenAI's structured outputs require a name).
-    --   If Nothing, a default name will be derived from the type.
-
-    , jsStrict     :: Bool
-    -- ^ Whether to enforce strict schema adherence.
-    --   When True, the provider must generate output that exactly
-    --   conforms to the schema (no additional properties allowed).
-    --   Some providers support this (OpenAI's strict mode) while
-    --   others may ignore it.
+    { jsSchema  :: Value
+    , jsTypeName :: Maybe Text
+    , jsStrict   :: Bool
     } deriving (Show, Eq)
 
--- | Derive a JSON Schema from a Haskell type.
+-- | Automatically derive a JSON Schema from a Haskell type.
 --
--- This is the primary entry point for structured output support.
--- Given a type @a@ that has a @Generic@ instance, it produces
--- a JSON Schema @Value@ that can be passed to LLM providers.
+-- For record types, each field becomes a property in the schema.
+-- Fields wrapped in @Maybe@ are omitted from the \"required\" list.
 --
--- === Implementation Plan
---
--- Use @GHC.Generics@ to walk the type's structure and produce
--- a JSON Schema. The key cases:
+-- === Defining tools with auto-derived schemas
 --
 -- @
--- jsonSchema \@Text       → {"type": "string"}
--- jsonSchema \@Int        → {"type": "integer"}
--- jsonSchema \@Double     → {"type": "number"}
--- jsonSchema \@Bool       → {"type": "boolean"}
--- jsonSchema @(Maybe a)   → jsonSchema \@a  (but field is not required)
--- jsonSchema @"[a]"       → {"type": "array", "items": jsonSchema \@a}
--- jsonSchema \@MyRecord  → {"type": "object", "properties": {...}, "required": [...]}
+-- data GetWeatherArgs = GetWeatherArgs
+--     { city :: Text
+--     , unit :: Maybe Text
+--     } deriving (Generic, FromJSON, HasJsonSchema)
+--
+-- weatherTool :: ToolHandler
+-- weatherTool = tool \"get_weather\" \"Get the current weather\" $ \\args -> do
+--     pure $ Aeson.object [\"temperature\" Aeson..= (22 :: Int), ...]
 -- @
 --
--- For record types, each field becomes a property. Fields wrapped
--- in @Maybe@ are omitted from the \"required\" list.
---
--- This function has the signature:
+-- === Primitive type mappings
 --
 -- @
--- jsonSchema :: forall a. (HasJsonSchema a) => Value
+-- jsonSchema \@Text    → {"type": "string"}
+-- jsonSchema \@Int     → {"type": "integer"}
+-- jsonSchema \@Double  → {"type": "number"}
+-- jsonSchema \@Bool    → {"type": "boolean"}
+-- jsonSchema \@[a]    → {"type": "array", "items": jsonSchema \@a}
 -- @
---
--- where @HasJsonSchema@ is a typeclass that can be derived via
--- @Generic@ for standard types.
---
--- === Future Work
---
--- * Support for @newtype@ wrappers (transparent in schema)
--- * Support for custom JSON Schema annotations (description, examples)
--- * Support for @oneOf@/@anyOf@/@allOf@ for sum types
--- * Integration with @typed-json-schema@ or similar packages
-jsonSchema :: forall a. Value
-jsonSchema = error "jsonSchema: not yet implemented. Use GHC.Generics to derive JSON Schema from Haskell types."
--- TODO: Implement using GHC.Generics.
--- The HasJsonSchema typeclass and its Generic-derived instances
--- will walk the type structure and produce a JSON Schema Value.
--- This should handle: basic types, Maybe, lists, records, and
--- simple sum types.
+class HasJsonSchema a where
+    jsonSchema :: Value
+    default jsonSchema :: (Generic a, GRecordSchema (Rep a)) => Value
+    jsonSchema =
+        let (props, req) = gRecordSchema @(Rep a)
+        in object
+            [ "type" .= ("object" :: Text)
+            , "properties" .= object (map (\(k, v) -> Key.fromText k .= v) props)
+            , "required" .= Vector.fromList req
+            ]
+
+-- Primitive type instances
+
+instance HasJsonSchema Text where
+    jsonSchema = object ["type" .= ("string" :: Text)]
+
+instance HasJsonSchema String where
+    jsonSchema = object ["type" .= ("string" :: Text)]
+
+instance HasJsonSchema Char where
+    jsonSchema = object ["type" .= ("string" :: Text)]
+
+instance HasJsonSchema Int where
+    jsonSchema = object ["type" .= ("integer" :: Text)]
+
+instance HasJsonSchema Integer where
+    jsonSchema = object ["type" .= ("integer" :: Text)]
+
+instance HasJsonSchema Int8 where
+    jsonSchema = object ["type" .= ("integer" :: Text)]
+
+instance HasJsonSchema Int16 where
+    jsonSchema = object ["type" .= ("integer" :: Text)]
+
+instance HasJsonSchema Int32 where
+    jsonSchema = object ["type" .= ("integer" :: Text)]
+
+instance HasJsonSchema Int64 where
+    jsonSchema = object ["type" .= ("integer" :: Text)]
+
+instance HasJsonSchema Word where
+    jsonSchema = object ["type" .= ("integer" :: Text)]
+
+instance HasJsonSchema Word8 where
+    jsonSchema = object ["type" .= ("integer" :: Text)]
+
+instance HasJsonSchema Word16 where
+    jsonSchema = object ["type" .= ("integer" :: Text)]
+
+instance HasJsonSchema Word32 where
+    jsonSchema = object ["type" .= ("integer" :: Text)]
+
+instance HasJsonSchema Word64 where
+    jsonSchema = object ["type" .= ("integer" :: Text)]
+
+instance HasJsonSchema Double where
+    jsonSchema = object ["type" .= ("number" :: Text)]
+
+instance HasJsonSchema Float where
+    jsonSchema = object ["type" .= ("number" :: Text)]
+
+instance HasJsonSchema Bool where
+    jsonSchema = object ["type" .= ("boolean" :: Text)]
+
+instance HasJsonSchema a => HasJsonSchema [a] where
+    jsonSchema = object
+        [ "type" .= ("array" :: Text)
+        , "items" .= jsonSchema @a
+        ]
+
+-- | @Maybe a@ uses the inner type's schema.
+-- Optionality is handled in record derivation: @Maybe@ fields
+-- are excluded from the \"required\" list.
+instance HasJsonSchema a => HasJsonSchema (Maybe a) where
+    jsonSchema = jsonSchema @a
+
+-- Generic record schema derivation
+
+-- | Extract field names and schemas from a Generic representation.
+--   Returns @(properties, required)@ where properties is a list
+--   of @(name, schema)@ pairs and required is a list of field names
+--   that are mandatory (non-Maybe).
+class GRecordSchema f where
+    gRecordSchema :: ([(Text, Value)], [Text])
+
+-- Data type wrapper (M1 D)
+instance GRecordSchema f => GRecordSchema (M1 D d f) where
+    gRecordSchema = gRecordSchema @f
+
+-- Constructor wrapper (M1 C)
+instance GRecordSchema f => GRecordSchema (M1 C c f) where
+    gRecordSchema = gRecordSchema @f
+
+-- Product type: combine fields from both sides
+instance (GRecordSchema f, GRecordSchema g) => GRecordSchema (f :*: g) where
+    gRecordSchema =
+        let (fProps, fReq) = gRecordSchema @f
+            (gProps, gReq) = gRecordSchema @g
+        in (fProps ++ gProps, fReq ++ gReq)
+
+-- Unit type (empty record)
+instance GRecordSchema U1 where
+    gRecordSchema = ([], [])
+
+-- Maybe field: in properties but NOT in required
+instance {-# OVERLAPPING #-} (Selector s, HasJsonSchema a) => GRecordSchema (S1 s (K1 R (Maybe a))) where
+    gRecordSchema =
+        let name = Text.pack (selName (undefined :: M1 S s (K1 R (Maybe a)) ()))
+        in ([(name, jsonSchema @a)], [])
+
+-- Required field: in properties AND in required
+instance {-# OVERLAPPABLE #-} (Selector s, HasJsonSchema a) => GRecordSchema (S1 s (K1 R a)) where
+    gRecordSchema =
+        let name = Text.pack (selName (undefined :: M1 S s (K1 R a) ()))
+        in ([(name, jsonSchema @a)], [name])

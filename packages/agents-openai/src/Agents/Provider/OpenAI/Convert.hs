@@ -55,18 +55,19 @@ toOpenAIMessages :: [Message] -> Either ProviderError (Vector (CC.Message (Vecto
 toOpenAIMessages msgs = Vector.fromList <$> traverse toOpenAIMessage msgs
 
 toOpenAIMessage :: Message -> Either ProviderError (CC.Message (Vector CC.Content))
-toOpenAIMessage msg = do
-    contents <- traverse toOpenAIContent (messageContent msg)
-    let vContents = Vector.fromList contents
-    case messageRole msg of
-        System    -> pure CC.System
-            { CC.content = vContents
-            , CC.name    = Nothing
-            }
-        User      -> pure CC.User
-            { CC.content = vContents
-            , CC.name    = Nothing
-            }
+toOpenAIMessage msg = case messageRole msg of
+        System -> do
+            contents <- traverse toOpenAIContent (messageContent msg)
+            pure CC.System
+                { CC.content = Vector.fromList contents
+                , CC.name    = Nothing
+                }
+        User -> do
+            contents <- traverse toOpenAIContent (messageContent msg)
+            pure CC.User
+                { CC.content = Vector.fromList contents
+                , CC.name    = Nothing
+                }
         Assistant -> case partitionToolCalls (messageContent msg) of
             (textParts, []) -> pure CC.Assistant
                 { CC.assistant_content = Just (Vector.fromList textParts)
@@ -82,7 +83,7 @@ toOpenAIMessage msg = do
                 , CC.assistant_audio   = Nothing
                 , CC.tool_calls        = Just (Vector.fromList tcs)
                 }
-        Tool      -> case messageContent msg of
+        Tool -> case messageContent msg of
             [ToolResultContent tr] -> pure CC.Tool
                 { CC.content      = Vector.singleton (CC.Text (jsonValueToText (trResult tr)))
                 , CC.tool_call_id = trToolCallId tr

@@ -26,6 +26,8 @@ library
         Agents.StreamEvent
         Agents.Tool
         Agents.Schema
+        Agents.Memory
+        Agents.Agent
         Agents.Provider
 
     build-depends:

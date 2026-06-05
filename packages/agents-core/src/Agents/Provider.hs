@@ -7,6 +7,7 @@ module Agents.Provider
     , module Agents.StreamEvent
     , module Agents.Tool
     , module Agents.Schema
+    , module Agents.Memory
     ) where
 
 import Data.Conduit (ConduitT)
@@ -26,8 +27,9 @@ import Agents.Types
     , ToolResult(..)
     )
 import Agents.StreamEvent (StreamEvent(..))
-import Agents.Tool (ToolDefinition(..))
-import Agents.Schema (JsonSchema(..), jsonSchema)
+import Agents.Tool (ToolDefinition(..), ToolHandler(..), ToolRegistry, toolHandlerDef, toolRegistryDefs, tool)
+import Agents.Schema (JsonSchema(..), HasJsonSchema(..))
+import Agents.Memory (MemoryProvider(..), newInMemoryMemory)
 
 -- | The core abstraction for LLM providers.
 --
