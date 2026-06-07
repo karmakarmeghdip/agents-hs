@@ -10,6 +10,8 @@
   # https://devenv.sh/languages/
   languages.haskell.enable = true;
 
+  dotenv.enable = true;
+
   # https://devenv.sh/tasks/
   # tasks = {
   #   "myproj:setup".exec = "mytool build";

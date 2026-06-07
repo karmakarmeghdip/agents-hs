@@ -9,8 +9,9 @@ module Agents.Provider.Claude
 import Control.Concurrent (forkIO)
 import Control.Concurrent.STM (atomically, newTChanIO, readTChan, writeTChan)
 import Control.Exception (SomeException, try)
+import Control.Monad (unless)
 import Data.Conduit (ConduitT, yield)
-import Data.IORef (newIORef)
+import Data.IORef (newIORef, readIORef)
 import qualified Data.Text as Text
 
 import Effectful (Eff, IOE, (:>))
@@ -69,20 +70,28 @@ instance Provider ClaudeProvider where
             request = (buildRequest claudeMessages systemPrompt genConfig tools)
                 { CM.stream = Just True
                 }
-        inputTokensRef <- E.liftIO $ newIORef (0 :: Int)
+        accumRef <- E.liftIO $ newIORef emptyClaudeAccumState
         chan <- E.liftIO newTChanIO
         _ <- E.liftIO $ forkIO $ do
             CV1.createMessageStreamTyped mds request $ \event -> do
-                atomically $ writeTChan chan (Just event)
+                case event of
+                    Left errMsg ->
+                        atomically $ writeTChan chan (Just [StreamError errMsg])
+                    Right streamEvent -> do
+                        events <- processStreamEvent accumRef streamEvent
+                        unless (null events) $
+                            atomically $ writeTChan chan (Just events)
+            remainingAccum <- readIORef accumRef
+            let finalEvents = finalizeClaudeAccumState remainingAccum
+            unless (null finalEvents) $
+                atomically $ writeTChan chan (Just finalEvents)
             atomically $ writeTChan chan Nothing
         pure $ do
             let loop = do
                     me <- E.liftIO $ atomically $ readTChan chan
                     case me of
                         Nothing -> pure ()
-                        Just (Left errMsg) -> yield (StreamError errMsg) >> loop
-                        Just (Right streamEvent) -> do
-                            events <- E.liftIO $ processStreamEvent inputTokensRef streamEvent
+                        Just events -> do
                             mapM_ yield events
                             loop
             loop

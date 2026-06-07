@@ -37,7 +37,7 @@ main = do
   let config =
         ProviderConfig
           { pcApiKey = Text.pack (stripQuotes apiKey),
-            pcBaseUrl = "https://api.openai.com"
+            pcBaseUrl = "https://opencode.ai/zen/go"
           }
 
   putStrLn "=== Creating OpenAI provider ==="
@@ -46,7 +46,7 @@ main = do
 
   let genConfig =
         GenerationConfig
-          { gcModel = "gpt-5.4-mini",
+          { gcModel = "glm-5.1",
             gcMaxTokens = Just 100,
             gcTemperature = Just 0.7,
             gcTopP = Nothing,

@@ -11,6 +11,9 @@ module Agents.Agent
       AgentResult(..)
     , -- * Error types
       AgentError(..)
+    , -- * Internal helpers (shared with StreamingAgent)
+      executeToolCall
+    , prependSystemPrompt
     ) where
 
 import qualified Data.Map as Map

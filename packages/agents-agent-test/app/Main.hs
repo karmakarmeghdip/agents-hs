@@ -7,17 +7,22 @@ module Main where
 
 import Data.Aeson qualified as Aeson
 import Data.Aeson (FromJSON)
+import Data.Conduit (runConduit, (.|))
+import qualified Data.Conduit.List as CL
 import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
-import Effectful (runEff)
+import Effectful (runEff, Eff, IOE, (:>))
 import Effectful.Error.Static (runError)
+import Effectful (liftIO)
 import System.Directory (doesFileExist)
 import System.Environment (getEnv, setEnv)
+import System.IO (hFlush, stdout)
 import Control.Exception (SomeException, try)
 import GHC.Generics (Generic)
 
 import Agents.Agent (Agent (..), AgentError (..), AgentResult (..), AgentStep (..), runAgent)
+import Agents.StreamingAgent (StreamingAgentEvent(..), streamAgent)
 import Agents.Memory (MemoryProvider (..), newInMemoryMemory)
 import Agents.Provider (tool, HasJsonSchema(..))
 import Agents.Provider.OpenAI (newOpenAIProvider)
@@ -117,6 +122,51 @@ main = do
             putStrLn $ "Finish reason: " ++ show (arFinishReason res)
             putStrLn $ "Steps taken: " ++ show (length (arSteps res))
             printSteps (arSteps res)
+
+    -- Streaming Tests
+    putStrLn "\n=== Test 4: Streaming agent (simple question) ==="
+    mpClear mem
+    streamingResult4 <- runEff $ runError @AgentError $ do
+        source <- streamAgent agent (Message User [TextContent "What is the capital of Germany?"])
+        runConduit $ source .| CL.mapM_ printStreamingEventEff
+    case streamingResult4 of
+        Left (_, err) -> putStrLn $ "STREAMING ERROR: " ++ show err
+        Right _ -> putStrLn "=== Test 4 complete ==="
+
+    putStrLn "\n=== Test 5: Streaming agent (tool call) ==="
+    mpClear mem
+    streamingResult5 <- runEff $ runError @AgentError $ do
+        source <- streamAgent agent (Message User [TextContent "What's the weather in Paris?"])
+        runConduit $ source .| CL.mapM_ printStreamingEventEff
+    case streamingResult5 of
+        Left (_, err) -> putStrLn $ "STREAMING ERROR: " ++ show err
+        Right _ -> putStrLn "=== Test 5 complete ==="
+
+    putStrLn "\n=== Test 6: Streaming agent (multi-step) ==="
+    mpClear mem
+    streamingResult6 <- runEff $ runError @AgentError $ do
+        source <- streamAgent agent (Message User [TextContent "Compare the weather in Berlin and Tokyo."])
+        runConduit $ source .| CL.mapM_ printStreamingEventEff
+    case streamingResult6 of
+        Left (_, err) -> putStrLn $ "STREAMING ERROR: " ++ show err
+        Right _ -> putStrLn "=== Test 6 complete ==="
+
+printStreamingEventEff :: (IOE :> es) => StreamingAgentEvent -> Eff es ()
+printStreamingEventEff event = liftIO $ printStreamingEvent event
+
+printStreamingEvent :: StreamingAgentEvent -> IO ()
+printStreamingEvent = \case
+    StreamingAgentTextDelta txt -> putStr (Text.unpack txt) >> hFlush stdout
+    StreamingAgentThinkingDelta txt -> putStr $ "[THINKING] " ++ Text.unpack txt
+    StreamingAgentToolCallStarted tid tname -> putStrLn $ "\n[TOOL CALL START] id=" ++ Text.unpack tid ++ " name=" ++ Text.unpack tname
+    StreamingAgentToolCallCompleted tc -> putStrLn $ "[TOOL CALL END] id=" ++ Text.unpack (tcId tc) ++ " name=" ++ Text.unpack (tcName tc)
+    StreamingAgentToolResult tc tr -> putStrLn $ "[TOOL RESULT] name=" ++ Text.unpack (tcName tc) ++ " isError=" ++ show (trIsError tr)
+    StreamingAgentStepComplete step -> putStrLn $ "[STEP COMPLETE] " ++ showStep step
+    StreamingAgentComplete result -> putStrLn $ "\n[COMPLETE] text=" ++ show (arText result) ++ " reason=" ++ show (arFinishReason result)
+    StreamingAgentError err -> putStrLn $ "[ERROR] " ++ show err
+  where
+    showStep (StepLLM resp) = "LLM finish=" ++ show (crFinishReason resp)
+    showStep (StepTool tc _tr) = "Tool name=" ++ Text.unpack (tcName tc)
 
 printSteps :: [AgentStep] -> IO ()
 printSteps = mapM_ printStep

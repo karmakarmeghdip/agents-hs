@@ -23,7 +23,9 @@ import Agents.Types
 import Control.Concurrent (forkIO)
 import Control.Concurrent.STM (atomically, newTChanIO, readTChan, writeTChan)
 import Control.Exception (SomeException, try)
+import Control.Monad (unless)
 import Data.Conduit (ConduitT, yield)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Text qualified as Text
 import Effectful (Eff, IOE, (:>))
 import Effectful qualified as E
@@ -74,18 +76,30 @@ instance Provider OpenAIProvider where
                     }
             }
     chan <- E.liftIO newTChanIO
+    accumRef <- E.liftIO $ newIORef emptyAccumState
     _ <- E.liftIO $ forkIO $ do
       OpenAI.createChatCompletionStreamTyped mds request $ \event -> do
-        atomically $ writeTChan chan (Just event)
+        case event of
+          Left errMsg ->
+            atomically $ writeTChan chan (Just [StreamError errMsg])
+          Right chunk -> do
+            accum <- readIORef accumRef
+            let (newAccum, events) = processChunk accum chunk
+            writeIORef accumRef newAccum
+            unless (null events) $
+              atomically $ writeTChan chan (Just events)
+      remainingAccum <- readIORef accumRef
+      let finalEvents = finalizeAccumState remainingAccum
+      unless (null finalEvents) $
+        atomically $ writeTChan chan (Just finalEvents)
       atomically $ writeTChan chan Nothing
     pure $ do
       let loop = do
             me <- E.liftIO $ atomically $ readTChan chan
             case me of
               Nothing -> pure ()
-              Just (Left errMsg) -> yield (StreamError errMsg) >> loop
-              Just (Right chunk) -> do
-                mapM_ yield (chunkToStreamEvents chunk)
+              Just evts -> do
+                mapM_ yield evts
                 loop
       loop
       yield StreamDone

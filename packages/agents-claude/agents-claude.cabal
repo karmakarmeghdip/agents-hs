@@ -38,6 +38,7 @@ library
         http-client >= 0.7 && < 0.8,
         http-client-tls >= 0.3 && < 0.4,
         vector >= 0.12 && < 0.14,
+        containers >= 0.6 && < 0.8,
         stm >= 2.5 && < 2.6
 
     hs-source-dirs:   src
